@@ -1,42 +1,54 @@
 import streamlit as st
+import yfinance as yf
+import os
 import json
-import threading
-import time
+
+st.title("Auto Trading Dashboard")
 
 DATA_FILE = "data.json"
 
-# -------------------------
-# 자동매매 엔진
-# -------------------------
-def trading_engine():
-    while True:
-        try:
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
+# ✅ 파일 없으면 자동 생성
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({}, f)
 
-            # 🔥 여기서 매매 로직 (임시)
-            data["balance"] *= 1.0002  # 아주 작은 수익 시뮬레이션
-
-            with open(DATA_FILE, "w") as f:
-                json.dump(data, f)
-
-            time.sleep(5)
-
-        except Exception as e:
-            print("engine error:", e)
-            time.sleep(5)
-
-# -------------------------
-# 백그라운드 실행
-# -------------------------
-threading.Thread(target=trading_engine, daemon=True).start()
-
-# -------------------------
-# 웹 UI
-# -------------------------
-st.title("Auto Trading Dashboard")
-
+# ✅ 데이터 로드
 with open(DATA_FILE, "r") as f:
-    data = json.load(f)
+    try:
+        data = json.load(f)
+    except:
+        data = {}
 
-st.metric("총 자산", f"{data['balance']:,}원")
+# =========================
+# 📊 관심 종목
+# =========================
+stocks = {
+    "삼성전자": "005930.KS",
+    "SK하이닉스": "000660.KS",
+    "삼성전기": "009150.KS",
+    "LG CNS": "003550.KS"
+}
+
+st.subheader("📈 실시간 가격")
+
+for name, ticker in stocks.items():
+    try:
+        price = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+        st.write(f"{name}: {price:,.0f}원")
+    except:
+        st.write(f"{name}: 데이터 오류")
+
+# =========================
+# 💾 상태 저장
+# =========================
+st.subheader("💾 저장 상태")
+st.json(data)
+
+# =========================
+# 🧠 테스트 버튼
+# =========================
+if st.button("테스트 저장"):
+    data["test"] = "ok"
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
+    st.success("저장 완료")
