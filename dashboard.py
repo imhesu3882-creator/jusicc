@@ -1,22 +1,42 @@
 import streamlit as st
 import json
+import threading
 import time
 
-st.title("자동매매 대시보드")
+DATA_FILE = "data.json"
 
-placeholder = st.empty()
+# -------------------------
+# 자동매매 엔진
+# -------------------------
+def trading_engine():
+    while True:
+        try:
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
 
-while True:
-    try:
-        with open("data.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
+            # 🔥 여기서 매매 로직 (임시)
+            data["balance"] *= 1.0002  # 아주 작은 수익 시뮬레이션
 
-        with placeholder.container():
-            st.write("시간:", data["time"])
-            st.write("현금:", data["cash"])
-            st.write("상태:", data["note"])
+            with open(DATA_FILE, "w") as f:
+                json.dump(data, f)
 
-    except:
-        st.write("데이터 없음")
+            time.sleep(5)
 
-    time.sleep(5)
+        except Exception as e:
+            print("engine error:", e)
+            time.sleep(5)
+
+# -------------------------
+# 백그라운드 실행
+# -------------------------
+threading.Thread(target=trading_engine, daemon=True).start()
+
+# -------------------------
+# 웹 UI
+# -------------------------
+st.title("Auto Trading Dashboard")
+
+with open(DATA_FILE, "r") as f:
+    data = json.load(f)
+
+st.metric("총 자산", f"{data['balance']:,}원")
