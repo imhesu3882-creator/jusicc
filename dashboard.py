@@ -1,65 +1,75 @@
 import streamlit as st
-from engine import run_engine, calc_portfolio
+from engine import init_state, run_engine
 
 st.set_page_config(page_title="Auto Trading Dashboard", layout="wide")
 
+# 상태 초기화
+if "state" not in st.session_state:
+    st.session_state.state = init_state()
+
 st.title("📊 Auto Trading Dashboard 🤖")
 
-# =====================
-# 엔진 실행
-# =====================
-data, prices = run_engine()
-portfolio, total = calc_portfolio(data, prices)
+state, prices = run_engine(st.session_state.state)
+st.session_state.state = state
 
-# =====================
-# 가격
-# =====================
+
+# ======================
+# 📈 가격
+# ======================
 st.subheader("📈 실시간 가격")
 
-cols = st.columns(len(prices))
-for i, (name, price) in enumerate(prices.items()):
-    with cols[i]:
-        st.metric(name, f"{price:,}원")
+for k, v in prices.items():
+    st.write(f"**{k}** : {v:,.0f}원" if v else f"**{k}** : 데이터 오류")
 
-# =====================
-# 계좌
-# =====================
+
+# ======================
+# 💰 계좌
+# ======================
 st.subheader("💰 계좌")
 
-st.write(f"현금: {data['balance']:,}원")
-st.write(f"총 자산: {total:,}원")
+asset = state["balance"]
+for stock, pos in state["positions"].items():
+    price = prices.get(stock, 0)
+    asset += pos["qty"] * (price or 0)
 
-profit = total - 10_000_000
-st.write(f"손익: {profit:+,}원")
+col1, col2 = st.columns(2)
+col1.metric("현금", f"{state['balance']:,.0f}원")
+col2.metric("총 자산", f"{asset:,.0f}원")
 
-# =====================
-# 보유 종목
-# =====================
+
+# ======================
+# 📦 포지션
+# ======================
 st.subheader("📦 보유 종목")
 
-if len(portfolio) == 0:
-    st.write("보유 없음")
-else:
-    for p in portfolio:
-        st.write(
-            f"📌 {p['stock']} | {p['qty']}주 | "
-            f"{p['price']:,}원 | 평가 {p['value']:,}원"
-        )
+if state["positions"]:
+    for stock, pos in state["positions"].items():
+        price = prices.get(stock, 0)
+        pnl = (price - pos["avg"]) * pos["qty"] if price else 0
 
-# =====================
-# 거래 내역
-# =====================
+        st.write(f"""
+        **{stock}**
+        - 수량: {pos['qty']}
+        - 평단: {pos['avg']:.0f}
+        - 현재가: {price:,.0f}
+        - 평가손익: {pnl:,.0f}
+        """)
+else:
+    st.write("보유 없음")
+
+
+# ======================
+# 🧾 거래 내역
+# ======================
 st.subheader("🧾 거래 내역")
 
-for t in data["trades"][-20:]:
-    st.write(
-        f"{t['time']} | {t['type']} | {t['stock']} | "
-        f"{t['price']:,}원 | RSI {t['rsi']}"
-    )
+for t in state["trades"][-10:]:
+    st.write(t)
 
-# =====================
-# 상태
-# =====================
-st.subheader("💾 상태")
 
-st.json(data)
+# ======================
+# 📊 자산 그래프
+# ======================
+st.subheader("📊 자산 그래프")
+
+st.line_chart(state["history"])
