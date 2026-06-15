@@ -1,158 +1,106 @@
-import json
-import os
+import yfinance as yf
 import random
-from datetime import datetime
+import time
 
-DATA_FILE = "data.json"
-
-
-# =========================
-# 안전 로더 (핵심)
-# =========================
-def load_data():
-    default = {
-        "balance": 10_000_000,
-        "positions": {},
-        "trades": [],
-        "price_history": {}
-    }
-
-    if not os.path.exists(DATA_FILE):
-        save_data(default)
-        return default
-
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-        except:
-            return default
-
-    if not isinstance(data, dict):
-        return default
-
-    data["balance"] = data.get("balance", 10_000_000)
-
-    if not isinstance(data.get("positions"), dict):
-        data["positions"] = {}
-
-    if not isinstance(data.get("trades"), list):
-        data["trades"] = []
-
-    if not isinstance(data.get("price_history"), dict):
-        data["price_history"] = {}
-
-    return data
+STOCKS = {
+    "삼성전자": "005930.KS",
+    "SK하이닉스": "000660.KS",
+    "삼성전기": "009150.KS",
+    "LG CNS": "003550.KS"
+}
 
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-# =========================
-# 가격 (시뮬 + 안정화)
-# =========================
 def get_prices():
+    prices = {}
+    for name, code in STOCKS.items():
+        try:
+            data = yf.download(code, period="1d", interval="1m", progress=False)
+            price = float(data["Close"].iloc[-1])
+            prices[name] = price
+        except:
+            prices[name] = None
+    return prices
+
+
+def init_state():
     return {
-        "삼성전자": 337000 + random.randint(-2000, 2000),
-        "SK하이닉스": 2288000 + random.randint(-15000, 15000),
-        "삼성전기": 1999000 + random.randint(-12000, 12000),
-        "LG CNS": 118400 + random.randint(-1200, 1200),
+        "balance": 10_000_000,
+        "positions": {},   # {종목: {qty, avg_price}}
+        "trades": [],
+        "history": []
     }
 
 
-# =========================
-# RSI
-# =========================
-def calc_rsi(values, period=14):
-    if len(values) < period + 1:
-        return 50
+def buy(state, stock, price, qty):
+    cost = price * qty
+    if state["balance"] < cost:
+        return state
 
-    gains, losses = 0, 0
+    state["balance"] -= cost
 
-    for i in range(-period, 0):
-        diff = values[i] - values[i - 1]
-        if diff > 0:
-            gains += diff
-        else:
-            losses -= diff
+    if stock not in state["positions"]:
+        state["positions"][stock] = {"qty": 0, "avg": 0}
 
-    if losses == 0:
-        return 100
+    pos = state["positions"][stock]
+    new_qty = pos["qty"] + qty
+    pos["avg"] = (pos["avg"] * pos["qty"] + price * qty) / new_qty
+    pos["qty"] = new_qty
 
-    rs = gains / losses
-    return 100 - (100 / (1 + rs))
+    state["trades"].append(f"BUY {stock} {qty} @ {price:.0f}")
+    return state
 
 
-# =========================
-# 자동매매 엔진
-# =========================
-def run_engine():
-    data = load_data()
-    prices = get_prices()
+def sell(state, stock, price, qty):
+    if stock not in state["positions"]:
+        return state
 
+    pos = state["positions"][stock]
+    if pos["qty"] < qty:
+        qty = pos["qty"]
+
+    state["balance"] += price * qty
+    pos["qty"] -= qty
+
+    pnl = (price - pos["avg"]) * qty
+    state["trades"].append(f"SELL {stock} {qty} @ {price:.0f} PNL {pnl:.0f}")
+
+    if pos["qty"] == 0:
+        del state["positions"][stock]
+
+    return state
+
+
+def auto_trade(state, prices):
     for stock, price in prices.items():
+        if price is None:
+            continue
 
-        # price history 보호막
-        if stock not in data["price_history"]:
-            data["price_history"][stock] = []
+        r = random.random()
 
-        data["price_history"][stock].append(price)
+        # 🔥 아주 단순 RSI 흉내 전략 (너 나중에 바꾸면 됨)
+        if r < 0.03:
+            state = buy(state, stock, price, 5)
 
-        if len(data["price_history"][stock]) > 50:
-            data["price_history"][stock].pop(0)
+        elif r > 0.97:
+            state = sell(state, stock, price, 5)
 
-        rsi = calc_rsi(data["price_history"][stock])
-
-        qty = data["positions"].get(stock, 0)
-
-        # BUY
-        if rsi < 30 and data["balance"] >= price:
-            data["balance"] -= price
-            data["positions"][stock] = qty + 1
-
-            data["trades"].append({
-                "type": "BUY",
-                "stock": stock,
-                "price": price,
-                "rsi": round(rsi, 2),
-                "time": str(datetime.now())
-            })
-
-        # SELL
-        if rsi > 70 and qty > 0:
-            data["balance"] += price
-            data["positions"][stock] = qty - 1
-
-            data["trades"].append({
-                "type": "SELL",
-                "stock": stock,
-                "price": price,
-                "rsi": round(rsi, 2),
-                "time": str(datetime.now())
-            })
-
-    save_data(data)
-    return data, prices
+    return state
 
 
-# =========================
-# 포트폴리오
-# =========================
-def calc_portfolio(data, prices):
-    portfolio = []
-    total = data["balance"]
+def total_asset(state, prices):
+    asset = state["balance"]
 
-    for stock, qty in data["positions"].items():
-        price = prices.get(stock, 0)
-        value = qty * price
-        total += value
+    for stock, pos in state["positions"].items():
+        price = prices.get(stock)
+        if price:
+            asset += pos["qty"] * price
 
-        portfolio.append({
-            "stock": stock,
-            "qty": qty,
-            "price": price,
-            "value": value
-        })
+    return asset
 
-    return portfolio, total
+
+def run_engine(state):
+    prices = get_prices()
+    state = auto_trade(state, prices)
+    state["history"].append(total_asset(state, prices))
+
+    return state, prices
