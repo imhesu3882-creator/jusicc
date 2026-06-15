@@ -6,16 +6,15 @@ from datetime import datetime
 
 DATA_FILE = "data.json"
 
-# ----------------------------
-# 데이터 로드 / 초기화
-# ----------------------------
+# -----------------------------
+# 데이터 로드/초기화 (완전 안전버전)
+# -----------------------------
 def load_data():
     if not os.path.exists(DATA_FILE):
         data = {
             "balance": 10_000_000,
             "positions": {},
-            "trades": [],
-            "history": []
+            "trades": []
         }
         save_data(data)
         return data
@@ -23,18 +22,10 @@ def load_data():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # 🔥 구조 방어 (옛날 데이터 자동 복구)
-    if not isinstance(data.get("positions"), dict):
-        data["positions"] = {}
-
-    if "balance" not in data:
-        data["balance"] = 10_000_000
-
-    if "trades" not in data:
-        data["trades"] = []
-
-    if "history" not in data:
-        data["history"] = []
+    # 구조 보정
+    data.setdefault("balance", 10_000_000)
+    data.setdefault("positions", {})
+    data.setdefault("trades", [])
 
     return data
 
@@ -44,9 +35,9 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ----------------------------
-# 가짜 실시간 가격 (나중에 API 연결 가능)
-# ----------------------------
+# -----------------------------
+# 실시간 가격 (시뮬)
+# -----------------------------
 def get_prices():
     return {
         "삼성전자": 337000 + random.randint(-2000, 2000),
@@ -56,41 +47,64 @@ def get_prices():
     }
 
 
-# ----------------------------
-# 거래 로직
-# ----------------------------
-def buy(data, stock, price):
-    qty = 1
-    cost = price * qty
+# -----------------------------
+# 자동매매 엔진 (핵심)
+# -----------------------------
+def auto_trade(data, prices):
+    for stock, price in prices.items():
 
-    if data["balance"] >= cost:
-        data["balance"] -= cost
-        data["positions"][stock] = data["positions"].get(stock, 0) + qty
+        qty = data["positions"].get(stock, 0)
 
-        data["trades"].append({
-            "type": "BUY",
+        # 🎯 매수 조건 (단순 시뮬 전략)
+        if price % 9 == 0 and data["balance"] > price:
+            data["balance"] -= price
+            data["positions"][stock] = qty + 1
+
+            data["trades"].append({
+                "type": "BUY",
+                "stock": stock,
+                "price": price,
+                "time": str(datetime.now())
+            })
+
+        # 🎯 매도 조건 (익절/손절 시뮬)
+        if qty > 0 and price % 13 == 0:
+            data["positions"][stock] = qty - 1
+            data["balance"] += price
+
+            data["trades"].append({
+                "type": "SELL",
+                "stock": stock,
+                "price": price,
+                "time": str(datetime.now())
+            })
+
+
+# -----------------------------
+# 포트폴리오 계산
+# -----------------------------
+def calc_portfolio(data, prices):
+    portfolio = []
+    total_asset = data["balance"]
+
+    for stock, qty in data["positions"].items():
+        price = prices.get(stock, 0)
+        value = qty * price
+        total_asset += value
+
+        portfolio.append({
             "stock": stock,
+            "qty": qty,
             "price": price,
-            "time": str(datetime.now())
+            "value": value
         })
 
-
-def sell(data, stock, price):
-    if data["positions"].get(stock, 0) > 0:
-        data["positions"][stock] -= 1
-        data["balance"] += price
-
-        data["trades"].append({
-            "type": "SELL",
-            "stock": stock,
-            "price": price,
-            "time": str(datetime.now())
-        })
+    return portfolio, total_asset
 
 
-# ----------------------------
+# -----------------------------
 # UI
-# ----------------------------
+# -----------------------------
 st.set_page_config(page_title="Auto Trading Dashboard", layout="wide")
 
 st.title("📊 Auto Trading Dashboard 🤖")
@@ -98,56 +112,54 @@ st.title("📊 Auto Trading Dashboard 🤖")
 data = load_data()
 prices = get_prices()
 
-# ----------------------------
-# 가격 영역
-# ----------------------------
+# 자동매매 실행 (핵심)
+auto_trade(data, prices)
+save_data(data)
+
+# -----------------------------
+# 실시간 가격
+# -----------------------------
 st.subheader("📈 실시간 가격")
 
-cols = st.columns(4)
+cols = st.columns(len(prices))
 
 for i, (name, price) in enumerate(prices.items()):
     with cols[i]:
         st.metric(name, f"{price:,}원")
 
-        if st.button(f"{name} 매수"):
-            buy(data, name, price)
-            save_data(data)
-            st.rerun()
 
-        if st.button(f"{name} 매도"):
-            sell(data, name, price)
-            save_data(data)
-            st.rerun()
+# -----------------------------
+# 포트폴리오
+# -----------------------------
+portfolio, total_asset = calc_portfolio(data, prices)
 
-
-# ----------------------------
-# 계좌 정보
-# ----------------------------
-st.subheader("💰 계좌")
-
-total_asset = data["balance"]
-
-for stock, qty in data["positions"].items():
-    total_asset += qty * prices.get(stock, 0)
-
+st.subheader("💰 계좌 정보")
 st.write(f"현금: {data['balance']:,}원")
 st.write(f"총 자산: {total_asset:,}원")
 
 st.subheader("📦 보유 종목")
-st.json(data["positions"])
+
+if len(portfolio) == 0:
+    st.write("보유 종목 없음")
+else:
+    for p in portfolio:
+        st.write(
+            f"{p['stock']} | 수량 {p['qty']} | "
+            f"현재가 {p['price']:,}원 | 평가금 {p['value']:,}원"
+        )
 
 
-# ----------------------------
-# 거래 로그
-# ----------------------------
+# -----------------------------
+# 거래 내역
+# -----------------------------
 st.subheader("🧾 거래 내역")
 
-st.dataframe(data["trades"][-20:])
+for t in data["trades"][-15:]:
+    st.write(f"{t['time']} | {t['type']} | {t['stock']} | {t['price']:,}원")
 
 
-# ----------------------------
-# 저장 상태
-# ----------------------------
-st.subheader("💾 상태 파일")
-
+# -----------------------------
+# 상태 JSON
+# -----------------------------
+st.subheader("💾 상태 데이터")
 st.json(data)
