@@ -6,15 +6,15 @@ from datetime import datetime
 DATA_FILE = "data.json"
 
 
-# -----------------------------
-# 데이터 로드/저장
-# -----------------------------
+# =========================
+# 안전 로더 (핵심)
+# =========================
 def load_data():
     default = {
         "balance": 10_000_000,
         "positions": {},
         "trades": [],
-        "price_history": []
+        "price_history": {}
     }
 
     if not os.path.exists(DATA_FILE):
@@ -22,15 +22,24 @@ def load_data():
         return default
 
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except:
+            return default
 
     if not isinstance(data, dict):
         return default
 
-    data.setdefault("balance", 10_000_000)
-    data.setdefault("positions", {})
-    data.setdefault("trades", [])
-    data.setdefault("price_history", [])
+    data["balance"] = data.get("balance", 10_000_000)
+
+    if not isinstance(data.get("positions"), dict):
+        data["positions"] = {}
+
+    if not isinstance(data.get("trades"), list):
+        data["trades"] = []
+
+    if not isinstance(data.get("price_history"), dict):
+        data["price_history"] = {}
 
     return data
 
@@ -40,27 +49,26 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# -----------------------------
-# 가격 데이터
-# -----------------------------
+# =========================
+# 가격 (시뮬 + 안정화)
+# =========================
 def get_prices():
     return {
-        "삼성전자": 337000 + random.randint(-3000, 3000),
+        "삼성전자": 337000 + random.randint(-2000, 2000),
         "SK하이닉스": 2288000 + random.randint(-15000, 15000),
         "삼성전기": 1999000 + random.randint(-12000, 12000),
         "LG CNS": 118400 + random.randint(-1200, 1200),
     }
 
 
-# -----------------------------
-# RSI 계산
-# -----------------------------
+# =========================
+# RSI
+# =========================
 def calc_rsi(values, period=14):
     if len(values) < period + 1:
         return 50
 
-    gains = 0
-    losses = 0
+    gains, losses = 0, 0
 
     for i in range(-period, 0):
         diff = values[i] - values[i - 1]
@@ -76,16 +84,16 @@ def calc_rsi(values, period=14):
     return 100 - (100 / (1 + rs))
 
 
-# -----------------------------
-# 자동매매 엔진 (RSI)
-# -----------------------------
+# =========================
+# 자동매매 엔진
+# =========================
 def run_engine():
     data = load_data()
     prices = get_prices()
 
     for stock, price in prices.items():
 
-        # 히스토리
+        # price history 보호막
         if stock not in data["price_history"]:
             data["price_history"][stock] = []
 
@@ -99,7 +107,7 @@ def run_engine():
         qty = data["positions"].get(stock, 0)
 
         # BUY
-        if rsi < 30 and data["balance"] > price:
+        if rsi < 30 and data["balance"] >= price:
             data["balance"] -= price
             data["positions"][stock] = qty + 1
 
@@ -113,8 +121,8 @@ def run_engine():
 
         # SELL
         if rsi > 70 and qty > 0:
-            data["positions"][stock] = qty - 1
             data["balance"] += price
+            data["positions"][stock] = qty - 1
 
             data["trades"].append({
                 "type": "SELL",
@@ -128,9 +136,9 @@ def run_engine():
     return data, prices
 
 
-# -----------------------------
-# 포트폴리오 계산
-# -----------------------------
+# =========================
+# 포트폴리오
+# =========================
 def calc_portfolio(data, prices):
     portfolio = []
     total = data["balance"]
