@@ -3,24 +3,27 @@ import yfinance as yf
 import os
 import json
 
-st.title("Auto Trading Dashboard")
+st.set_page_config(page_title="Auto Trading Dashboard", layout="wide")
 
-DATA_FILE = "data.json"
-
-# ✅ 파일 없으면 자동 생성
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump({}, f)
-
-# ✅ 데이터 로드
-with open(DATA_FILE, "r") as f:
-    try:
-        data = json.load(f)
-    except:
-        data = {}
+st.title("Auto Trading Dashboard 🤖")
 
 # =========================
-# 📊 관심 종목
+# 📁 데이터 파일 자동 생성
+# =========================
+DATA_FILE = "data.json"
+
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({
+            "capital": 10000000,
+            "positions": {}
+        }, f)
+
+with open(DATA_FILE, "r") as f:
+    data = json.load(f)
+
+# =========================
+# 📊 종목
 # =========================
 stocks = {
     "삼성전자": "005930.KS",
@@ -29,36 +32,68 @@ stocks = {
     "LG CNS": "003550.KS"
 }
 
+# =========================
+# 📈 가격 함수
+# =========================
+def get_price(ticker):
+    return yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+
+# =========================
+# 📊 실시간 가격 표시
+# =========================
 st.subheader("📈 실시간 가격")
+
+prices = {}
 
 for name, ticker in stocks.items():
     try:
-        price = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+        price = get_price(ticker)
+        prices[name] = price
         st.write(f"{name}: {price:,.0f}원")
     except:
         st.write(f"{name}: 데이터 오류")
 
 # =========================
-# 💾 상태 저장
+# 🤖 자동매매 파라미터
 # =========================
-st.subheader("💾 저장 상태")
-st.json(data)
+buy_threshold = -1.5
+sell_threshold = 2.0
 
-# =========================
-# 🧠 테스트 버튼
-# =========================
-if st.button("테스트 저장"):
-    data["test"] = "ok"
+st.subheader("🤖 자동매매 시뮬레이션")
+
+if st.button("자동매매 실행"):
+    logs = []
+
+    if "positions" not in data:
+        data["positions"] = {}
+
+    for name, price in prices.items():
+
+        if name not in data["positions"]:
+            data["positions"][name] = price
+            logs.append(f"🟢 매수 진입: {name} @ {price:,.0f}")
+
+        else:
+            entry = data["positions"][name]
+            change = ((price - entry) / entry) * 100
+
+            if change <= buy_threshold:
+                logs.append(f"🟡 추가매수 신호: {name} ({change:.2f}%)")
+
+            elif change >= sell_threshold:
+                logs.append(f"🔴 매도 신호: {name} ({change:.2f}%)")
+                del data["positions"][name]
+
+            else:
+                logs.append(f"⏸ 홀딩: {name} ({change:.2f}%)")
+
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
-    st.success("저장 완료")
-import time
-import pandas as pd
 
-st.subheader("🤖 자동매매 시뮬레이터")
+    st.write(logs)
 
-capital = 10_000_000
-positions = {}
-
-buy_threshold = -1.5   # -1.5% 떨어지면 매수
-sell_threshold = 2.0   # +2% 오르면 매도
+# =========================
+# 💾 상태
+# =========================
+st.subheader("💾 포트폴리오 상태")
+st.json(data)
