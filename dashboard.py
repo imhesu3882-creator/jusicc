@@ -52,3 +52,13 @@ if st.button("테스트 저장"):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
     st.success("저장 완료")
+import time
+import pandas as pd
+
+st.subheader("🤖 자동매매 시뮬레이터")
+
+capital = 10_000_000
+positions = {}
+
+buy_threshold = -1.5   # -1.5% 떨어지면 매수
+sell_threshold = 2.0   # +2% 오르면 매도
