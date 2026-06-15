@@ -1,18 +1,18 @@
 import streamlit as st
-import yfinance as yf
 import json
 import os
+import random
 from datetime import datetime
 
 DATA_FILE = "data.json"
 
-# =========================
-# 초기 데이터 자동 생성
-# =========================
+# ----------------------------
+# 데이터 로드 / 초기화
+# ----------------------------
 def load_data():
     if not os.path.exists(DATA_FILE):
         data = {
-            "balance": 10000000,
+            "balance": 10_000_000,
             "positions": {},
             "trades": [],
             "history": []
@@ -20,139 +20,134 @@ def load_data():
         save_data(data)
         return data
 
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # 🔥 구조 방어 (옛날 데이터 자동 복구)
+    if not isinstance(data.get("positions"), dict):
+        data["positions"] = {}
+
+    if "balance" not in data:
+        data["balance"] = 10_000_000
+
+    if "trades" not in data:
+        data["trades"] = []
+
+    if "history" not in data:
+        data["history"] = []
+
+    return data
+
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# =========================
-# 종목 매핑 (한국주식)
-# =========================
-TICKERS = {
-    "삼성전자": "005930.KS",
-    "SK하이닉스": "000660.KS",
-    "삼성전기": "009150.KS",
-    "LG CNS": "064400.KS"
-}
 
-# =========================
-# 가격 가져오기
-# =========================
-def get_price(ticker):
-    try:
-        df = yf.download(ticker, period="1d", interval="1m", progress=False)
-        if df is None or df.empty:
-            return None
-        return float(df["Close"].iloc[-1])
-    except:
-        return None
+# ----------------------------
+# 가짜 실시간 가격 (나중에 API 연결 가능)
+# ----------------------------
+def get_prices():
+    return {
+        "삼성전자": 337000 + random.randint(-2000, 2000),
+        "SK하이닉스": 2288000 + random.randint(-10000, 10000),
+        "삼성전기": 1999000 + random.randint(-8000, 8000),
+        "LG CNS": 118400 + random.randint(-1000, 1000),
+    }
 
-# =========================
-# UI 시작
-# =========================
-st.set_page_config(page_title="Auto Trading Dashboard", layout="wide")
-st.title("📊 Auto Trading Dashboard")
 
-data = load_data()
+# ----------------------------
+# 거래 로직
+# ----------------------------
+def buy(data, stock, price):
+    qty = 1
+    cost = price * qty
 
-# =========================
-# 가격 영역
-# =========================
-st.subheader("📈 실시간 가격")
+    if data["balance"] >= cost:
+        data["balance"] -= cost
+        data["positions"][stock] = data["positions"].get(stock, 0) + qty
 
-prices = {}
-
-for name, ticker in TICKERS.items():
-    price = get_price(ticker)
-    prices[name] = price
-
-    if price is None:
-        st.error(f"{name}: 데이터 오류")
-    else:
-        st.write(f"{name}: {price:,.0f}원")
-
-# =========================
-# 포트폴리오 계산
-# =========================
-total_value = data["balance"]
-
-for name, pos in data["positions"].items():
-    if name in prices and prices[name]:
-        total_value += prices[name] * pos
-
-# =========================
-# 자동 기록
-# =========================
-data["history"].append({
-    "time": str(datetime.now()),
-    "balance": total_value
-})
-
-if len(data["history"]) > 200:
-    data["history"] = data["history"][-200:]
-
-save_data(data)
-
-# =========================
-# 자산 영역
-# =========================
-st.subheader("💰 자산 현황")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("현금", f"{data['balance']:,.0f}원")
-col2.metric("총자산", f"{total_value:,.0f}원")
-col3.metric("포지션 수", len(data["positions"]))
-
-# =========================
-# 매매 패널
-# =========================
-st.subheader("🤖 자동매매")
-
-selected = st.selectbox("종목 선택", list(TICKERS.keys()))
-
-col1, col2 = st.columns(2)
-
-if col1.button("매수"):
-    if prices[selected]:
-        data["balance"] -= prices[selected]
-        data["positions"][selected] = data["positions"].get(selected, 0) + 1
         data["trades"].append({
             "type": "BUY",
-            "name": selected,
-            "price": prices[selected],
+            "stock": stock,
+            "price": price,
             "time": str(datetime.now())
         })
-        save_data(data)
-        st.rerun()
 
-if col2.button("매도"):
-    if data["positions"].get(selected, 0) > 0 and prices[selected]:
-        data["balance"] += prices[selected]
-        data["positions"][selected] -= 1
+
+def sell(data, stock, price):
+    if data["positions"].get(stock, 0) > 0:
+        data["positions"][stock] -= 1
+        data["balance"] += price
 
         data["trades"].append({
             "type": "SELL",
-            "name": selected,
-            "price": prices[selected],
+            "stock": stock,
+            "price": price,
             "time": str(datetime.now())
         })
-        save_data(data)
-        st.rerun()
 
-# =========================
-# 그래프
-# =========================
-st.subheader("📉 자산 그래프")
 
-if len(data["history"]) > 1:
-    st.line_chart([h["balance"] for h in data["history"]])
+# ----------------------------
+# UI
+# ----------------------------
+st.set_page_config(page_title="Auto Trading Dashboard", layout="wide")
 
-# =========================
+st.title("📊 Auto Trading Dashboard 🤖")
+
+data = load_data()
+prices = get_prices()
+
+# ----------------------------
+# 가격 영역
+# ----------------------------
+st.subheader("📈 실시간 가격")
+
+cols = st.columns(4)
+
+for i, (name, price) in enumerate(prices.items()):
+    with cols[i]:
+        st.metric(name, f"{price:,}원")
+
+        if st.button(f"{name} 매수"):
+            buy(data, name, price)
+            save_data(data)
+            st.rerun()
+
+        if st.button(f"{name} 매도"):
+            sell(data, name, price)
+            save_data(data)
+            st.rerun()
+
+
+# ----------------------------
+# 계좌 정보
+# ----------------------------
+st.subheader("💰 계좌")
+
+total_asset = data["balance"]
+
+for stock, qty in data["positions"].items():
+    total_asset += qty * prices.get(stock, 0)
+
+st.write(f"현금: {data['balance']:,}원")
+st.write(f"총 자산: {total_asset:,}원")
+
+st.subheader("📦 보유 종목")
+st.json(data["positions"])
+
+
+# ----------------------------
 # 거래 로그
-# =========================
-st.subheader("📜 거래 로그")
+# ----------------------------
+st.subheader("🧾 거래 내역")
 
 st.dataframe(data["trades"][-20:])
+
+
+# ----------------------------
+# 저장 상태
+# ----------------------------
+st.subheader("💾 상태 파일")
+
+st.json(data)
